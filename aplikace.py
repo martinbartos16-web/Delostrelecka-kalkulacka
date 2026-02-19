@@ -8,6 +8,7 @@ import os
 
 st.set_page_config(
     page_title="Dělostřelecká kalkulačka",
+    page_icon="🎯",
     layout="centered",
     menu_items={
         "About": (
@@ -411,7 +412,7 @@ def to_dms(deg, is_lat):
 # STRÁNKA: HLAVNÍ MENU
 # ============================================================
 if st.session_state.page == 'home':
-    st.title("Dělostřelecká kalkulačka")
+    st.title("🎯 Dělostřelecká kalkulačka")
     st.markdown("---")
     st.write("**Vyberte úlohu, kterou chcete počítat:**")
     st.button("HGÚ 1",              on_click=go_to_hgu1,      use_container_width=True)
@@ -675,9 +676,9 @@ elif st.session_state.page == 'hgu2':
 
     col1, col2 = st.columns(2)
     with col1:
-        ea   = st.number_input("E bodu A:",  step=1, key='ea2')
-        na   = st.number_input("N bodu A:",  step=1, key='na2')
-        alta = st.number_input("Alt bodu A:", step=1, key='alta2')
+        ea   = st.number_input("E bodu A (Stanovisko):",  step=1, key='ea2')
+        na   = st.number_input("N bodu A (Stanovisko):",  step=1, key='na2')
+        alta = st.number_input("Alt bodu A (Stanovisko):", step=1, key='alta2')
     with col2:
         eb   = st.number_input("E bodu B (Cíl):",  step=1, key='eb2')
         nb   = st.number_input("N bodu B (Cíl):",  step=1, key='nb2')
