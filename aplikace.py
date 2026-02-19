@@ -6,6 +6,22 @@ import pandas as pd
 import json
 import os
 
+st.set_page_config(
+    page_title="Dělostřelecká kalkulačka",
+    page_icon="🎯",
+    layout="centered",
+    menu_items={
+        "About": (
+            "### Dělostřelecká kalkulačka\n"
+            "Aplikace pro výpočet hlavních geodetických úloh, "
+            "dílcového pravidla a převod souřadnic.\n\n"
+            "**Vytvořil:** rtm. Martin Bartoš"
+        ),
+        "Report a bug": None,
+        "Get help": None,
+    }
+)
+
 try:
     import folium
     from streamlit_folium import st_folium
@@ -77,10 +93,9 @@ def validate_smernik(value, label="Směrník"):
         st.stop()
 
 # ============================================================
-# ČISTÁ MATEMATIKA: UTM → WGS84 (bez pyproj)
+# ČISTÁ MATEMATIKA: UTM ↔ WGS84
 # ============================================================
 def utm_to_wgs84_math(easting, northing, zone_number, northern=True):
-    """Převod UTM souřadnic na WGS84 – čistá matematika, žádné závislosti."""
     a   = 6378137.0
     f   = 1 / 298.257223563
     e2  = 2 * f - f ** 2
@@ -110,18 +125,17 @@ def utm_to_wgs84_math(easting, northing, zone_number, northern=True):
 
     lat = phi1 - (N1 * math.tan(phi1) / R1) * (
           D**2/2
-        - (5 + 3*T1 + 10*C1 - 4*C1**2 - 9*ep2)                    * D**4/24
-        + (61 + 90*T1 + 298*C1 + 45*T1**2 - 252*ep2 - 3*C1**2)    * D**6/720)
+        - (5 + 3*T1 + 10*C1 - 4*C1**2 - 9*ep2)                 * D**4/24
+        + (61 + 90*T1 + 298*C1 + 45*T1**2 - 252*ep2 - 3*C1**2) * D**6/720)
 
     lon = (D
-           - (1 + 2*T1 + C1)                                        * D**3/6
-           + (5 - 2*C1 + 28*T1 - 3*C1**2 + 8*ep2 + 24*T1**2)      * D**5/120
+           - (1 + 2*T1 + C1)                                    * D**3/6
+           + (5 - 2*C1 + 28*T1 - 3*C1**2 + 8*ep2 + 24*T1**2)  * D**5/120
           ) / math.cos(phi1)
 
     return math.degrees(lat), math.degrees(lon) + lon_origin
 
 def wgs84_to_utm_math(lat_deg, lon_deg):
-    """Převod WGS84 na UTM – čistá matematika."""
     a   = 6378137.0
     f   = 1 / 298.257223563
     e2  = 2 * f - f ** 2
@@ -131,19 +145,19 @@ def wgs84_to_utm_math(lat_deg, lon_deg):
     lat = math.radians(lat_deg)
     lon = math.radians(lon_deg)
 
-    zone_number  = int((lon_deg + 180) / 6) + 1
-    lon_origin   = math.radians((zone_number - 1) * 6 - 180 + 3)
-    zone_letter  = "CDEFGHJKLMNPQRSTUVWXX"[int((lat_deg + 80) / 8)]
+    zone_number = int((lon_deg + 180) / 6) + 1
+    lon_origin  = math.radians((zone_number - 1) * 6 - 180 + 3)
+    zone_letter = "CDEFGHJKLMNPQRSTUVWXX"[int((lat_deg + 80) / 8)]
 
-    N  = a / math.sqrt(1 - e2 * math.sin(lat)**2)
-    T  = math.tan(lat)**2
-    C  = ep2 * math.cos(lat)**2
-    A  = math.cos(lat) * (lon - lon_origin)
-    M  = a * (
-          (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256)   * lat
-        - (3*e2/8 + 3*e2**2/32 + 45*e2**3/1024)   * math.sin(2*lat)
-        + (15*e2**2/256 + 45*e2**3/1024)           * math.sin(4*lat)
-        - (35*e2**3/3072)                           * math.sin(6*lat))
+    N = a / math.sqrt(1 - e2 * math.sin(lat)**2)
+    T = math.tan(lat)**2
+    C = ep2 * math.cos(lat)**2
+    A = math.cos(lat) * (lon - lon_origin)
+    M = a * (
+          (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256)  * lat
+        - (3*e2/8 + 3*e2**2/32 + 45*e2**3/1024)  * math.sin(2*lat)
+        + (15*e2**2/256 + 45*e2**3/1024)          * math.sin(4*lat)
+        - (35*e2**3/3072)                          * math.sin(6*lat))
 
     easting  = (k0 * N * (A + (1-T+C)*A**3/6
                 + (5-18*T+T**2+72*C-58*ep2)*A**5/120) + 500000.0)
@@ -156,7 +170,7 @@ def wgs84_to_utm_math(lat_deg, lon_deg):
     return easting, northing, zone_number, zone_letter
 
 # ============================================================
-# PŘEVOD MGRS → WGS84 (čistá matematika)
+# PŘEVOD MGRS → WGS84
 # ============================================================
 def validate_zone_square(zone, square):
     zone   = zone.strip().upper()
@@ -398,7 +412,7 @@ def to_dms(deg, is_lat):
 # STRÁNKA: HLAVNÍ MENU
 # ============================================================
 if st.session_state.page == 'home':
-    st.title("Dělostřelecká kalkulačka")
+    st.title("🎯 Dělostřelecká kalkulačka")
     st.markdown("---")
     st.write("**Vyberte úlohu, kterou chcete počítat:**")
     st.button("HGÚ 1",              on_click=go_to_hgu1,      use_container_width=True)
@@ -406,6 +420,8 @@ if st.session_state.page == 'home':
     st.button("Dílcové pravidlo",   on_click=go_to_dilcove,   use_container_width=True)
     st.button("Převodník jednotek", on_click=go_to_prevodnik, use_container_width=True)
     st.button("Historie výpočtů",   on_click=go_to_history,   use_container_width=True)
+    st.markdown("---")
+    st.caption("Vytvořil rtm. Martin Bartoš")
 
 # ============================================================
 # STRÁNKA: HISTORIE VÝPOČTŮ
@@ -469,7 +485,6 @@ elif st.session_state.page == 'prevodnik':
             with c2:
                 utm_e = st.number_input("East (E):", value=0.0, step=1.0)
                 utm_n = st.number_input("North (N):", value=0.0, step=1.0)
-
             if st.button("Převést", type="primary", use_container_width=True):
                 try:
                     is_n     = "Severní" in utm_hemi
@@ -491,7 +506,6 @@ elif st.session_state.page == 'prevodnik':
                 lat_in = st.number_input("Zeměpisná šířka:", value=0.0, format="%.6f")
             with c2:
                 lon_in = st.number_input("Zeměpisná délka:", value=0.0, format="%.6f")
-
             if st.button("Převést", type="primary", use_container_width=True):
                 try:
                     e, n, zn, zl = wgs84_to_utm_math(lat_in, lon_in)
