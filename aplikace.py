@@ -259,8 +259,15 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
     return fig
 
 # ============================================================
-# INTERAKTIVNÍ MAPA (folium)
+# INTERAKTIVNÍ MAPA (folium) – opravená verze bez reload loopu
 # ============================================================
+try:
+    import folium
+    from streamlit_folium import folium_static   # folium_static místo st_folium
+    HAS_MAP = True
+except ImportError:
+    HAS_MAP = False
+
 def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
     if not HAS_MAP:
         st.error("Nainstalujte: `pip install folium streamlit-folium`")
@@ -312,14 +319,14 @@ def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
         location=[lat_a, lon_a],
         tooltip="Bod A",
         popup=folium.Popup(f"<b>Bod A</b><br>{label_a}", max_width=220),
-        icon=folium.Icon(color="blue", icon="record", prefix="fa"),
+        icon=folium.Icon(color="blue", icon="info-sign"),
     ).add_to(m)
 
     folium.Marker(
         location=[lat_b, lon_b],
         tooltip="Bod B",
         popup=folium.Popup(f"<b>Bod B</b><br>{label_b}", max_width=220),
-        icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+        icon=folium.Icon(color="red", icon="info-sign"),
     ).add_to(m)
 
     folium.PolyLine(
@@ -328,7 +335,8 @@ def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
         tooltip="Spojnice A–B",
     ).add_to(m)
 
-    st_folium(m, use_container_width=True, height=420, returned_objects=[])
+    # OPRAVA: folium_static místo st_folium – nevyvolává reload loop
+    folium_static(m, width=700, height=420)
 
 # ============================================================
 # WIDGET: zadání MGRS zóny a 100km čtverce
