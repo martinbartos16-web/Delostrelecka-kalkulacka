@@ -24,7 +24,7 @@ st.set_page_config(
 
 try:
     import folium
-    from streamlit_folium import st_folium
+    import streamlit.components.v1 as components
     HAS_MAP = True
 except ImportError:
     HAS_MAP = False
@@ -303,7 +303,7 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
 # ============================================================
 def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
     if not HAS_MAP:
-        st.error("Nainstalujte: `pip install folium streamlit-folium`")
+        st.error("Nainstalujte: `pip install folium`")
         return
 
     center_lat = (lat_a + lat_b) / 2
@@ -368,8 +368,9 @@ def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
         tooltip="Spojnice A–B",
     ).add_to(m)
 
-    st_folium(m, use_container_width=True, height=420,
-              returned_objects=[], key=f"map_{map_key}")
+    # Render přes čistý HTML – žádný streamlit-folium, žádný reload loop
+    map_html = m._repr_html_()
+    components.html(map_html, height=450, scrolling=False)
 
 # ============================================================
 # WIDGET: MGRS zóna a 100km čtverec
