@@ -7,16 +7,12 @@ import json
 import os
 
 try:
-    import mgrs
+    from pyproj import Transformer
     HAS_MGRS = True
+    HAS_UTM  = True
 except ImportError:
     HAS_MGRS = False
-
-try:
-    import utm
-    HAS_UTM = True
-except ImportError:
-    HAS_UTM = False
+    HAS_UTM  = False
 
 try:
     import folium
@@ -89,29 +85,9 @@ def validate_smernik(value, label="Směrník"):
         st.stop()
 
 # ============================================================
-# PŘEVOD MGRS E/N + ZÓNA + 100KM ČTVEREC → WGS84
+# PŘEVOD MGRS → WGS84 (čistě přes pyproj, bez knihovny mgrs)
 # ============================================================
-def mgrs_en_to_wgs84(e, n, zone_square):
-    """
-    Převede souřadnice uvnitř 100km čtverce na WGS84.
-    zone_square: např. "33UVR" (zóna 33U + čtverec VR)
-    e, n: souřadnice uvnitř čtverce v metrech (0–99999)
-    Vrací (lat, lon) nebo (None, None) při chybě.
-    """
-    if not HAS_MGRS:
-        return None, None
-    try:
-        e_int = int(round(e)) % 100000
-        n_int = int(round(n)) % 100000
-        mgrs_str = f"{zone_square.upper()}{e_int:05d}{n_int:05d}"
-        m_obj = mgrs.MGRS()
-        lat, lon = m_obj.toLatLon(mgrs_str)
-        return lat, lon
-    except Exception:
-        return None, None
-
 def validate_zone_square(zone, square):
-    """Ověří formát zóny (např. 33U) a 100km čtverce (např. VR)."""
     zone   = zone.strip().upper()
     square = square.strip().upper()
     if len(zone) != 3 or not zone[:2].isdigit() or not zone[2].isalpha():
@@ -120,8 +96,93 @@ def validate_zone_square(zone, square):
         return None, "100km čtverec musí mít formát: 2 písmena (např. **VR**)."
     return zone + square, None
 
+def mgrs_en_to_wgs84(e, n, zone_square):
+    """
+    Převede souřadnice uvnitř MGRS 100km čtverce na WGS84.
+    zone_square: např. "33UVR"
+    e, n: souřadnice uvnitř čtverce (0–99999)
+    """
+    try:
+        zone_num    = int(zone_square[:2])
+        zone_letter = zone_square[2].upper()
+        sq_e        = zone_square[3].upper()
+        sq_n        = zone_square[4].upper()
+
+        # Výpočet UTM easting z písmene čtverce
+        set_num = (zone_num - 1) % 3
+        if set_num == 0:
+            e_letters = "ABCDEFGH"
+        elif set_num == 1:
+            e_letters = "JKLMNPQR"
+        else:
+            e_letters = "STUVWXYZ"
+
+        e_idx        = e_letters.index(sq_e)
+        utm_easting  = (e_idx + 1) * 100000 + (int(e) % 100000)
+
+        # Výpočet UTM northing z písmene čtverce
+        n_letters = "ABCDEFGHJKLMNPQRSTUV"
+        n_offset  = 5 if zone_num % 2 == 0 else 0
+        n_letters_shifted = (n_letters * 3)[n_offset:]
+        n_idx        = n_letters_shifted.index(sq_n)
+        utm_northing = n_idx * 100000 + (int(n) % 100000)
+
+        # Korekce northing podle pásma zeměpisné šířky
+        band_northings = {
+            'C': 1000000, 'D': 2000000, 'E': 3000000, 'F': 4000000,
+            'G': 5000000, 'H': 6000000, 'J': 7000000, 'K': 8000000,
+            'L': 9000000, 'M': 10000000,'N': 0,       'P': 1000000,
+            'Q': 2000000, 'R': 3000000, 'S': 4000000, 'T': 5000000,
+            'U': 6000000, 'V': 7000000, 'W': 8000000, 'X': 9000000,
+        }
+        min_northing = band_northings.get(zone_letter, 0)
+        while utm_northing < min_northing:
+            utm_northing += 2000000
+
+        northern = zone_letter >= 'N'
+
+        transformer = Transformer.from_crs(
+            f"+proj=utm +zone={zone_num} "
+            f"+{'north' if northern else 'south'} +datum=WGS84",
+            "epsg:4326",
+            always_xy=True
+        )
+        lon, lat = transformer.transform(utm_easting, utm_northing)
+        return lat, lon
+
+    except Exception:
+        return None, None
+
 # ============================================================
-# NÁČRT SITUACE (matplotlib) – beze změny
+# PŘEVODNÍK SOUŘADNIC (pro záložku Souřadnice)
+# ============================================================
+def latlon_to_utm(lat, lon):
+    """WGS84 → UTM (automatická zóna)"""
+    zone_num = int((lon + 180) / 6) + 1
+    northern = lat >= 0
+    transformer = Transformer.from_crs(
+        "epsg:4326",
+        f"+proj=utm +zone={zone_num} "
+        f"+{'north' if northern else 'south'} +datum=WGS84",
+        always_xy=True
+    )
+    e, n = transformer.transform(lon, lat)
+    zone_letter = "CDEFGHJKLMNPQRSTUVWXX"[int((lat + 80) / 8)]
+    return e, n, zone_num, zone_letter
+
+def utm_to_latlon(e, n, zone_num, northern):
+    """UTM → WGS84"""
+    transformer = Transformer.from_crs(
+        f"+proj=utm +zone={zone_num} "
+        f"+{'north' if northern else 'south'} +datum=WGS84",
+        "epsg:4326",
+        always_xy=True
+    )
+    lon, lat = transformer.transform(e, n)
+    return lat, lon
+
+# ============================================================
+# NÁČRT SITUACE (matplotlib)
 # ============================================================
 def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -198,10 +259,9 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
     return fig
 
 # ============================================================
-# INTERAKTIVNÍ MAPA (folium) – přijímá přímo lat/lon
+# INTERAKTIVNÍ MAPA (folium)
 # ============================================================
-def show_map(lat_a, lon_a, lat_b, lon_b,
-             label_a, label_b, map_key="map"):
+def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
     if not HAS_MAP:
         st.error("Nainstalujte: `pip install folium streamlit-folium`")
         return
@@ -250,14 +310,14 @@ def show_map(lat_a, lon_a, lat_b, lon_b,
 
     folium.Marker(
         location=[lat_a, lon_a],
-        tooltip=label_a,
+        tooltip="Bod A",
         popup=folium.Popup(f"<b>Bod A</b><br>{label_a}", max_width=220),
         icon=folium.Icon(color="blue", icon="record", prefix="fa"),
     ).add_to(m)
 
     folium.Marker(
         location=[lat_b, lon_b],
-        tooltip=label_b,
+        tooltip="Bod B",
         popup=folium.Popup(f"<b>Bod B</b><br>{label_b}", max_width=220),
         icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
     ).add_to(m)
@@ -271,14 +331,9 @@ def show_map(lat_a, lon_a, lat_b, lon_b,
     st_folium(m, use_container_width=True, height=420, returned_objects=[])
 
 # ============================================================
-# POMOCNÝ WIDGET: vstup MGRS zóny a čtverce
-# Vrací (zone_square_str | None, chyba | None)
+# WIDGET: zadání MGRS zóny a 100km čtverce
 # ============================================================
 def mgrs_zone_input(key_suffix):
-    """
-    Zobrazí dvě políčka pro zónu a 100km čtverec.
-    Vrací (zone_square, error_msg).
-    """
     st.markdown("**Zadejte MGRS identifikátor oblasti** *(platí pro oba body)*")
     c1, c2, c3 = st.columns([1.2, 1.2, 3])
     with c1:
@@ -291,13 +346,12 @@ def mgrs_zone_input(key_suffix):
                                key=f"mgrs_sq_{key_suffix}")
     with c3:
         st.markdown(
-            "<br><small>Příklad kompletního MGRS: <b>33U VR 12400 32700</b><br>"
-            "→ Zóna: <b>33U</b> | Čtverec: <b>VR</b> | E: <b>12400</b> | N: <b>32700</b></small>",
+            "<br><small>Příklad: <b>33U VR 12400 32700</b><br>"
+            "→ Zóna: <b>33U</b> | Čtverec: <b>VR</b></small>",
             unsafe_allow_html=True
         )
-
     if not zone and not square:
-        return None, None   # uživatel ještě nic nezadal
+        return None, None
     zone_square, err = validate_zone_square(zone, square)
     return zone_square, err
 
@@ -377,78 +431,60 @@ elif st.session_state.page == 'prevodnik':
             save_history(st.session_state.history)
 
     with tab2:
-        st.subheader("Převod topografických souřadnic")
-        if not HAS_MGRS or not HAS_UTM:
-            st.error("Pro převod souřadnic nainstalujte:\n`pip install mgrs utm`")
+        st.subheader("Převod souřadnic")
+        if not HAS_UTM:
+            st.error("Pro převod souřadnic nainstalujte: `pip install pyproj`")
         else:
             typ_vstupu = st.radio("Z jakého formátu převádíte?",
-                                  ["MGRS", "UTM", "Zeměpisné (Stupně)"])
+                                  ["UTM → WGS84", "WGS84 → UTM"])
 
-            if typ_vstupu == "MGRS":
-                vstup_mgrs = st.text_input("Zadejte MGRS (např. 33UVQ 2300 1200):")
-                if st.button("Převést MGRS", type="primary", use_container_width=True):
-                    try:
-                        m     = mgrs.MGRS()
-                        cisty = vstup_mgrs.replace(" ", "").upper()
-                        lat, lon = m.toLatLon(cisty)
-                        east, north, zone_num, zone_letter = utm.from_latlon(lat, lon)
-                        st.success("Převod byl úspěšný!")
-                        st.write("**MGRS:**", cisty)
-                        st.write(f"**UTM:** Zóna {zone_num}{zone_letter}, E: {east:.0f}, N: {north:.0f}")
-                        st.write(f"**Desetinné:** Lat: {lat:.6f}°, Lon: {lon:.6f}°")
-                        st.write(f"**DMS:** {to_dms(lat, True)}, {to_dms(lon, False)}")
-                        zapis = f"MGRS {cisty} ➔ UTM: {zone_num}{zone_letter} E:{east:.0f} N:{north:.0f}"
-                        st.session_state.history.append({"Úloha": "Převod MGRS", "Zápis": zapis})
-                        save_history(st.session_state.history)
-                    except Exception as e:
-                        st.error(f"Chyba MGRS: {e}")
-
-            elif typ_vstupu == "UTM":
+            if typ_vstupu == "UTM → WGS84":
                 c1, c2 = st.columns(2)
                 with c1:
-                    utm_zone = st.number_input("Zóna:", min_value=1, max_value=60, value=33, step=1)
+                    utm_zone = st.number_input("Zóna:", min_value=1, max_value=60,
+                                               value=33, step=1)
                     utm_hemi = st.selectbox("Polokoule:", ["Severní (N)", "Jižní (S)"])
                 with c2:
                     utm_e = st.number_input("East (E):", value=0.0, step=1.0)
                     utm_n = st.number_input("North (N):", value=0.0, step=1.0)
-                if st.button("Převést UTM", type="primary", use_container_width=True):
+
+                if st.button("Převést UTM → WGS84", type="primary",
+                             use_container_width=True):
                     try:
                         is_n     = "Severní" in utm_hemi
-                        lat, lon = utm.to_latlon(utm_e, utm_n, utm_zone, northern=is_n)
-                        m        = mgrs.MGRS()
-                        mgrs_str = m.toMGRS(lat, lon)
+                        lat, lon = utm_to_latlon(utm_e, utm_n, utm_zone, is_n)
                         st.success("Převod byl úspěšný!")
                         st.write(f"**UTM:** Zóna {utm_zone}, E: {utm_e:.0f}, N: {utm_n:.0f}")
-                        st.write("**MGRS:**", mgrs_str)
-                        st.write(f"**Desetinné:** Lat: {lat:.6f}°, Lon: {lon:.6f}°")
-                        st.write(f"**DMS:** {to_dms(lat, True)}, {to_dms(lon, False)}")
-                        zapis = f"UTM {utm_zone} E:{utm_e:.0f} N:{utm_n:.0f} ➔ MGRS: {mgrs_str}"
+                        st.write(f"**WGS84 (Desetinné):** Lat: {lat:.6f}°, Lon: {lon:.6f}°")
+                        st.write(f"**WGS84 (DMS):** {to_dms(lat, True)}, {to_dms(lon, False)}")
+                        zapis = (f"UTM {utm_zone} E:{utm_e:.0f} N:{utm_n:.0f} ➔ "
+                                 f"Lat:{lat:.5f} Lon:{lon:.5f}")
                         st.session_state.history.append({"Úloha": "Převod UTM", "Zápis": zapis})
                         save_history(st.session_state.history)
                     except Exception as e:
-                        st.error(f"Chyba UTM: {e}")
+                        st.error(f"Chyba: {e}")
 
-            elif typ_vstupu == "Zeměpisné (Stupně)":
+            elif typ_vstupu == "WGS84 → UTM":
                 c1, c2 = st.columns(2)
                 with c1:
-                    lat_in = st.number_input("Šířka (např. 49.654321):", value=0.0, format="%.6f")
+                    lat_in = st.number_input("Zeměpisná šířka:", value=0.0, format="%.6f")
                 with c2:
-                    lon_in = st.number_input("Délka (např. 14.123456):", value=0.0, format="%.6f")
-                if st.button("Převést Zeměpisné", type="primary", use_container_width=True):
+                    lon_in = st.number_input("Zeměpisná délka:", value=0.0, format="%.6f")
+
+                if st.button("Převést WGS84 → UTM", type="primary",
+                             use_container_width=True):
                     try:
-                        m        = mgrs.MGRS()
-                        mgrs_str = m.toMGRS(lat_in, lon_in)
-                        east, north, zone_num, zone_letter = utm.from_latlon(lat_in, lon_in)
+                        e, n, zn, zl = latlon_to_utm(lat_in, lon_in)
                         st.success("Převod byl úspěšný!")
-                        st.write(f"**Desetinné:** Lat: {lat_in:.6f}°, Lon: {lon_in:.6f}°")
+                        st.write(f"**WGS84:** Lat: {lat_in:.6f}°, Lon: {lon_in:.6f}°")
+                        st.write(f"**UTM:** Zóna {zn}{zl}, E: {e:.0f}, N: {n:.0f}")
                         st.write(f"**DMS:** {to_dms(lat_in, True)}, {to_dms(lon_in, False)}")
-                        st.write("**MGRS:**", mgrs_str)
-                        st.write(f"**UTM:** Zóna {zone_num}{zone_letter}, E: {east:.0f}, N: {north:.0f}")
-                        zapis = f"Lat/Lon {lat_in:.4f}, {lon_in:.4f} ➔ MGRS: {mgrs_str}"
-                        st.session_state.history.append({"Úloha": "Převod Zem.", "Zápis": zapis})
+                        zapis = (f"Lat:{lat_in:.4f} Lon:{lon_in:.4f} ➔ "
+                                 f"UTM {zn}{zl} E:{e:.0f} N:{n:.0f}")
+                        st.session_state.history.append({"Úloha": "Převod WGS84", "Zápis": zapis})
                         save_history(st.session_state.history)
                     except Exception as e:
-                        st.error(f"Chyba zeměpisných souřadnic: {e}")
+                        st.error(f"Chyba: {e}")
 
 # ============================================================
 # STRÁNKA: DÍLCOVÉ PRAVIDLO
@@ -462,9 +498,12 @@ elif st.session_state.page == 'dilcove':
     st.write("Zadejte přesně **dvě známé hodnoty**. Třetí políčko nechte prázdné.")
 
     col1, col2, col3 = st.columns(3)
-    with col1: dil_m  = st.number_input("Velikost / Výška (m):", min_value=0.0, step=1.0, value=None, key='dil_m')
-    with col2: dil_km = st.number_input("Vzdálenost (km):",      min_value=0.0, step=0.1, value=None, key='dil_km')
-    with col3: dil_dc = st.number_input("Úhel (dc):",            min_value=0.0, step=0.1, value=None, key='dil_dc')
+    with col1: dil_m  = st.number_input("Velikost / Výška (m):", min_value=0.0,
+                                         step=1.0, value=None, key='dil_m')
+    with col2: dil_km = st.number_input("Vzdálenost (km):",      min_value=0.0,
+                                         step=0.1, value=None, key='dil_km')
+    with col3: dil_dc = st.number_input("Úhel (dc):",            min_value=0.0,
+                                         step=0.1, value=None, key='dil_dc')
 
     if st.button("Vypočítat", type="primary", use_container_width=True):
         vyplnene = [v for v in [dil_m, dil_km, dil_dc] if v is not None]
@@ -506,22 +545,17 @@ elif st.session_state.page == 'hgu1':
     st.button("Vymazat všechny hodnoty", on_click=clear_inputs, use_container_width=True)
     st.markdown("---")
 
-    # Checkbox mapy – vždy viditelný
     zobrazit_mapu = st.checkbox(
         "🗺️ Zobrazit geografickou mapu (vyžaduje zadání MGRS oblasti)",
         key="map_hgu1"
     )
 
-    # MGRS pole – zobrazí se POUZE pokud je checkbox zaškrtnutý
     zone_square_hgu1 = None
     if zobrazit_mapu:
-        if not HAS_MGRS:
-            st.error("Pro mapu nainstalujte: `pip install mgrs`")
-        else:
-            zone_square_hgu1, zs_err = mgrs_zone_input("hgu1")
-            if zs_err:
-                st.warning(f"⚠️ {zs_err}")
-                zone_square_hgu1 = None
+        zone_square_hgu1, zs_err = mgrs_zone_input("hgu1")
+        if zs_err:
+            st.warning(f"⚠️ {zs_err}")
+            zone_square_hgu1 = None
 
     st.markdown("---")
     st.subheader("Zadání hodnot")
@@ -557,23 +591,20 @@ elif st.session_state.page == 'hgu1':
         st.session_state.history.append({"Úloha": "HGÚ 1", "Zápis": zapis})
         save_history(st.session_state.history)
 
-        # Náčrt situace (vždy)
         st.markdown("---")
         st.subheader("Náčrt situace")
         fig = draw_plot(ea, na, eb, nb, angle, s)
         st.pyplot(fig)
 
-        # Mapa – pouze pokud je checkbox ON a MGRS bylo zadáno správně
         if zobrazit_mapu:
             st.markdown("---")
             st.subheader("Geografická poloha bodů")
             if zone_square_hgu1 is None:
                 st.warning("Zadejte platnou MGRS zónu a 100km čtverec pro zobrazení mapy.")
             else:
-                # Varování při překročení hranice 100km čtverce
                 if not (0 <= eb < 100000) or not (0 <= nb < 100000):
                     st.warning(
-                        "⚠️ Vypočítané souřadnice bodu B překračují hranici 100km čtverce. "
+                        "⚠️ Bod B překračuje hranici 100km čtverce. "
                         "Poloha na mapě může být nepřesná."
                     )
                 lat_a, lon_a = mgrs_en_to_wgs84(ea, na, zone_square_hgu1)
@@ -582,10 +613,10 @@ elif st.session_state.page == 'hgu1':
                 if lat_a is None or lat_b is None:
                     st.error("Nepodařilo se převést souřadnice. Zkontrolujte zónu a čtverec.")
                 else:
-                    label_a = (f"Bod A (Stanovisko)<br>"
+                    label_a = (f"Stanovisko<br>"
                                f"MGRS: {zone_square_hgu1} {int(ea):05d} {int(na):05d}<br>"
                                f"E: {ea:.0f} | N: {na:.0f} | Alt: {alta:.0f}")
-                    label_b = (f"Bod B (Výsledek)<br>"
+                    label_b = (f"Výsledný bod B<br>"
                                f"MGRS: {zone_square_hgu1} {int(eb):05d} {int(nb):05d}<br>"
                                f"E: {eb:.0f} | N: {nb:.0f} | Alt: {altb:.0f}")
                     show_map(lat_a, lon_a, lat_b, lon_b,
@@ -600,22 +631,17 @@ elif st.session_state.page == 'hgu2':
     st.button("Vymazat všechny hodnoty", on_click=clear_inputs, use_container_width=True)
     st.markdown("---")
 
-    # Checkbox mapy – vždy viditelný
     zobrazit_mapu = st.checkbox(
         "🗺️ Zobrazit geografickou mapu (vyžaduje zadání MGRS oblasti)",
         key="map_hgu2"
     )
 
-    # MGRS pole – zobrazí se POUZE pokud je checkbox zaškrtnutý
     zone_square_hgu2 = None
     if zobrazit_mapu:
-        if not HAS_MGRS:
-            st.error("Pro mapu nainstalujte: `pip install mgrs`")
-        else:
-            zone_square_hgu2, zs_err = mgrs_zone_input("hgu2")
-            if zs_err:
-                st.warning(f"⚠️ {zs_err}")
-                zone_square_hgu2 = None
+        zone_square_hgu2, zs_err = mgrs_zone_input("hgu2")
+        if zs_err:
+            st.warning(f"⚠️ {zs_err}")
+            zone_square_hgu2 = None
 
     st.markdown("---")
     st.subheader("Zadání hodnot")
@@ -661,13 +687,11 @@ elif st.session_state.page == 'hgu2':
         st.session_state.history.append({"Úloha": "HGÚ 2", "Zápis": zapis})
         save_history(st.session_state.history)
 
-        # Náčrt situace (vždy)
         st.markdown("---")
         st.subheader("Náčrt situace")
         fig = draw_plot(ea, na, eb, nb, angle_dilce, s)
         st.pyplot(fig)
 
-        # Mapa – pouze pokud je checkbox ON a MGRS bylo zadáno správně
         if zobrazit_mapu:
             st.markdown("---")
             st.subheader("Geografická poloha bodů")
@@ -680,10 +704,10 @@ elif st.session_state.page == 'hgu2':
                 if lat_a is None or lat_b is None:
                     st.error("Nepodařilo se převést souřadnice. Zkontrolujte zónu a čtverec.")
                 else:
-                    label_a = (f"Bod A (Stanovisko)<br>"
+                    label_a = (f"Stanovisko<br>"
                                f"MGRS: {zone_square_hgu2} {int(ea):05d} {int(na):05d}<br>"
                                f"E: {ea:.0f} | N: {na:.0f} | Alt: {alta:.0f}")
-                    label_b = (f"Bod B (Cíl)<br>"
+                    label_b = (f"Cíl<br>"
                                f"MGRS: {zone_square_hgu2} {int(eb):05d} {int(nb):05d}<br>"
                                f"E: {eb:.0f} | N: {nb:.0f} | Alt: {altb:.0f}")
                     show_map(lat_a, lon_a, lat_b, lon_b,
