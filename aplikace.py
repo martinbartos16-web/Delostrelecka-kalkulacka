@@ -22,13 +22,6 @@ st.set_page_config(
     }
 )
 
-try:
-    import folium
-    import streamlit.components.v1 as components
-    HAS_MAP = True
-except ImportError:
-    HAS_MAP = False
-
 # ============================================================
 # PERZISTENTNÍ PAMĚŤ
 # ============================================================
@@ -47,8 +40,8 @@ def save_history(history):
     try:
         with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(history, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.warning(f"Historii se nepodařilo uložit: {e}")
+    except Exception:
+        pass
 
 # ============================================================
 # INICIALIZACE SESSION STATE
@@ -104,12 +97,11 @@ def utm_to_wgs84_math(easting, northing, zone_number, northern=True):
 
     x = easting - 500000.0
     y = northing if northern else northing - 10000000.0
-
     lon_origin = (zone_number - 1) * 6 - 180 + 3
 
-    M    = y / k0
-    mu   = M / (a * (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256))
-    e1   = (1 - math.sqrt(1 - e2)) / (1 + math.sqrt(1 - e2))
+    M   = y / k0
+    mu  = M / (a * (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256))
+    e1  = (1 - math.sqrt(1 - e2)) / (1 + math.sqrt(1 - e2))
 
     phi1 = (mu
             + (3*e1/2 - 27*e1**3/32)      * math.sin(2*mu)
@@ -129,8 +121,8 @@ def utm_to_wgs84_math(easting, northing, zone_number, northern=True):
         + (61 + 90*T1 + 298*C1 + 45*T1**2 - 252*ep2 - 3*C1**2) * D**6/720)
 
     lon = (D
-           - (1 + 2*T1 + C1)                                    * D**3/6
-           + (5 - 2*C1 + 28*T1 - 3*C1**2 + 8*ep2 + 24*T1**2)  * D**5/120
+           - (1 + 2*T1 + C1)                                   * D**3/6
+           + (5 - 2*C1 + 28*T1 - 3*C1**2 + 8*ep2 + 24*T1**2) * D**5/120
           ) / math.cos(phi1)
 
     return math.degrees(lat), math.degrees(lon) + lon_origin
@@ -217,8 +209,7 @@ def mgrs_en_to_wgs84(e, n, zone_square):
             utm_northing += 2000000
 
         northern = zone_letter >= 'N'
-        lat, lon = utm_to_wgs84_math(utm_easting, utm_northing,
-                                     zone_num, northern)
+        lat, lon = utm_to_wgs84_math(utm_easting, utm_northing, zone_num, northern)
         return lat, lon
     except Exception:
         return None, None
@@ -238,10 +229,8 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
     x_center  = (x_min + x_max) / 2
     y_center  = (y_min + y_max) / 2
 
-    xlim = (x_center - max_range / 2, x_center + max_range / 2)
-    ylim = (y_center - max_range / 2, y_center + max_range / 2)
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
+    ax.set_xlim(x_center - max_range/2, x_center + max_range/2)
+    ax.set_ylim(y_center - max_range/2, y_center + max_range/2)
 
     ax.plot([ea, eb], [na, nb],
             color='red', marker='o', linestyle='-',
@@ -255,10 +244,8 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
     ax.plot([ea, ea], [na, na + north_len],
             color='gray', linestyle='--', linewidth=1.3, zorder=1, alpha=0.85)
     ax.annotate('',
-                xy=(ea, na + north_len),
-                xytext=(ea, na + north_len * 0.82),
-                arrowprops=dict(arrowstyle='->', color='gray',
-                                lw=1.5, mutation_scale=14))
+                xy=(ea, na + north_len), xytext=(ea, na + north_len * 0.82),
+                arrowprops=dict(arrowstyle='->', color='gray', lw=1.5, mutation_scale=14))
 
     mid_e  = (ea + eb) / 2
     mid_n  = (na + nb) / 2
@@ -270,19 +257,17 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
                       alpha=0.92, edgecolor='gray', linewidth=0.8))
 
     angle_int = int(round(angle_dilce)) % 6000
-    angle_str = f"σ = {angle_int // 100:02d}-{angle_int % 100:02d} dc"
-    dist_str  = f"d = {distance_m / 1000.0:.3f} km"
-
-    ax.text(0.97, 0.97, angle_str, transform=ax.transAxes,
-            color='crimson', fontsize=11, fontweight='bold', ha='right', va='top')
-    ax.text(0.97, 0.90, dist_str, transform=ax.transAxes,
-            color='steelblue', fontsize=11, fontweight='bold', ha='right', va='top')
+    ax.text(0.97, 0.97, f"σ = {angle_int // 100:02d}-{angle_int % 100:02d} dc",
+            transform=ax.transAxes, color='crimson',
+            fontsize=11, fontweight='bold', ha='right', va='top')
+    ax.text(0.97, 0.90, f"d = {distance_m / 1000.0:.3f} km",
+            transform=ax.transAxes, color='steelblue',
+            fontsize=11, fontweight='bold', ha='right', va='top')
 
     ax.annotate('',
                 xy=(0.065, 0.963), xytext=(0.065, 0.915),
                 xycoords='axes fraction', textcoords='axes fraction',
-                arrowprops=dict(arrowstyle='->', color='black',
-                                lw=2.2, mutation_scale=16))
+                arrowprops=dict(arrowstyle='->', color='black', lw=2.2, mutation_scale=16))
     ax.text(0.065, 0.975, 'S', transform=ax.transAxes,
             fontsize=14, fontweight='bold', ha='center', va='bottom', color='black')
 
@@ -294,83 +279,21 @@ def draw_plot(ea, na, eb, nb, angle_dilce, distance_m):
     ax.set_xlabel("E [km]", fontweight='bold')
     ax.set_ylabel("N [km]", fontweight='bold', rotation=0, labelpad=20)
     ax.set_title("Náčrt situace", fontweight='bold', fontsize=13)
-
     plt.tight_layout()
     return fig
 
 # ============================================================
-# INTERAKTIVNÍ MAPA (folium)
+# MAPA – st.map() (vestavěný Streamlit, žádné závislosti)
 # ============================================================
-def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b, map_key="map"):
-    if not HAS_MAP:
-        st.error("Nainstalujte: `pip install folium`")
-        return
-
-    center_lat = (lat_a + lat_b) / 2
-    center_lon = (lon_a + lon_b) / 2
-
-    dist_deg = math.sqrt((lat_b - lat_a)**2 + (lon_b - lon_a)**2)
-    if dist_deg < 0.005:   zoom = 16
-    elif dist_deg < 0.02:  zoom = 14
-    elif dist_deg < 0.1:   zoom = 12
-    elif dist_deg < 0.5:   zoom = 10
-    else:                  zoom = 8
-
-    tile_layer = st.selectbox(
-        "Typ mapové vrstvy:",
-        ["OpenStreetMap", "OpenTopoMap", "Esri Satellite"],
-        key=f"tile_{map_key}"
-    )
-
-    tile_urls = {
-        "OpenStreetMap": {
-            "tiles": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            "attr":  "© OpenStreetMap contributors",
-        },
-        "OpenTopoMap": {
-            "tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-            "attr":  "© OpenTopoMap contributors",
-        },
-        "Esri Satellite": {
-            "tiles": (
-                "https://server.arcgisonline.com/ArcGIS/rest/services/"
-                "World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            ),
-            "attr":  "© Esri",
-        },
-    }
-
-    t = tile_urls[tile_layer]
-    m = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=zoom,
-        tiles=t["tiles"],
-        attr=t["attr"],
-    )
-
-    folium.Marker(
-        location=[lat_a, lon_a],
-        tooltip="Bod A",
-        popup=folium.Popup(f"<b>Bod A</b><br>{label_a}", max_width=220),
-        icon=folium.Icon(color="blue", icon="info-sign"),
-    ).add_to(m)
-
-    folium.Marker(
-        location=[lat_b, lon_b],
-        tooltip="Bod B",
-        popup=folium.Popup(f"<b>Bod B</b><br>{label_b}", max_width=220),
-        icon=folium.Icon(color="red", icon="info-sign"),
-    ).add_to(m)
-
-    folium.PolyLine(
-        locations=[[lat_a, lon_a], [lat_b, lon_b]],
-        color="red", weight=2.5, dash_array="6",
-        tooltip="Spojnice A–B",
-    ).add_to(m)
-
-    # Render přes čistý HTML – žádný streamlit-folium, žádný reload loop
-    map_html = m._repr_html_()
-    components.html(map_html, height=450, scrolling=False)
+def show_map(lat_a, lon_a, lat_b, lon_b, label_a, label_b):
+    df = pd.DataFrame({
+        "lat": [lat_a, lat_b],
+        "lon": [lon_a, lon_b],
+    })
+    st.map(df, zoom=13, use_container_width=True)
+    c1, c2 = st.columns(2)
+    c1.info(f"📍 **Bod A**\nLat: {lat_a:.5f}°\nLon: {lon_a:.5f}°")
+    c2.info(f"🎯 **Bod B**\nLat: {lat_b:.5f}°\nLon: {lon_b:.5f}°")
 
 # ============================================================
 # WIDGET: MGRS zóna a 100km čtverec
@@ -453,7 +376,6 @@ elif st.session_state.page == 'prevodnik':
         uhl_vstup    = st.number_input("Zadejte hodnotu úhlu:", value=0.0, step=1.0)
         uhl_jednotka = st.selectbox("Z jaké jednotky převádíte?",
                                     ["Dílce (dc - 6000)", "NATO Mils (mil - 6400)", "Stupně (°)"])
-
         if st.button("Převést úhly", type="primary", use_container_width=True):
             if uhl_jednotka == "Dílce (dc - 6000)":
                 dc, mils, deg = uhl_vstup, uhl_vstup*(6400/6000), uhl_vstup*(360/6000)
@@ -461,7 +383,6 @@ elif st.session_state.page == 'prevodnik':
                 mils, dc, deg = uhl_vstup, uhl_vstup*(6000/6400), uhl_vstup*(360/6400)
             else:
                 deg, dc, mils = uhl_vstup, uhl_vstup*(6000/360), uhl_vstup*(6400/360)
-
             st.success("Převod úhlů byl úspěšný!")
             c1, c2, c3 = st.columns(3)
             c1.metric("Dílce (6000)",     f"{dc:.2f} dc")
@@ -474,14 +395,12 @@ elif st.session_state.page == 'prevodnik':
 
     with tab2:
         st.subheader("Převod souřadnic")
-        typ_vstupu = st.radio("Směr převodu:",
-                              ["UTM → WGS84", "WGS84 → UTM"])
+        typ_vstupu = st.radio("Směr převodu:", ["UTM → WGS84", "WGS84 → UTM"])
 
         if typ_vstupu == "UTM → WGS84":
             c1, c2 = st.columns(2)
             with c1:
-                utm_zone = st.number_input("Zóna:", min_value=1, max_value=60,
-                                           value=33, step=1)
+                utm_zone = st.number_input("Zóna:", min_value=1, max_value=60, value=33, step=1)
                 utm_hemi = st.selectbox("Polokoule:", ["Severní (N)", "Jižní (S)"])
             with c2:
                 utm_e = st.number_input("East (E):", value=0.0, step=1.0)
@@ -494,13 +413,11 @@ elif st.session_state.page == 'prevodnik':
                     st.write(f"**UTM:** Zóna {utm_zone}, E: {utm_e:.0f}, N: {utm_n:.0f}")
                     st.write(f"**WGS84:** Lat: {lat:.6f}°, Lon: {lon:.6f}°")
                     st.write(f"**DMS:** {to_dms(lat, True)}, {to_dms(lon, False)}")
-                    zapis = (f"UTM {utm_zone} E:{utm_e:.0f} N:{utm_n:.0f} ➔ "
-                             f"Lat:{lat:.5f} Lon:{lon:.5f}")
+                    zapis = f"UTM {utm_zone} E:{utm_e:.0f} N:{utm_n:.0f} ➔ Lat:{lat:.5f} Lon:{lon:.5f}"
                     st.session_state.history.append({"Úloha": "Převod UTM", "Zápis": zapis})
                     save_history(st.session_state.history)
                 except Exception as ex:
                     st.error(f"Chyba: {ex}")
-
         else:
             c1, c2 = st.columns(2)
             with c1:
@@ -514,8 +431,7 @@ elif st.session_state.page == 'prevodnik':
                     st.write(f"**WGS84:** Lat: {lat_in:.6f}°, Lon: {lon_in:.6f}°")
                     st.write(f"**UTM:** Zóna {zn}{zl}, E: {e:.0f}, N: {n:.0f}")
                     st.write(f"**DMS:** {to_dms(lat_in, True)}, {to_dms(lon_in, False)}")
-                    zapis = (f"Lat:{lat_in:.4f} Lon:{lon_in:.4f} ➔ "
-                             f"UTM {zn}{zl} E:{e:.0f} N:{n:.0f}")
+                    zapis = f"Lat:{lat_in:.4f} Lon:{lon_in:.4f} ➔ UTM {zn}{zl} E:{e:.0f} N:{n:.0f}"
                     st.session_state.history.append({"Úloha": "Převod WGS84", "Zápis": zapis})
                     save_history(st.session_state.history)
                 except Exception as ex:
@@ -597,13 +513,13 @@ elif st.session_state.page == 'hgu1':
 
     col1, col2 = st.columns(2)
     with col1:
-        ea   = st.number_input("E bodu A:",             step=1,              key='ea1')
-        na   = st.number_input("N bodu A:",             step=1,              key='na1')
-        alta = st.number_input("Alt bodu A:",           step=1,              key='alta1')
+        ea   = st.number_input("E bodu A:", step=1, key='ea1')
+        na   = st.number_input("N bodu A:", step=1, key='na1')
+        alta = st.number_input("Alt bodu A:", step=1, key='alta1')
     with col2:
-        s     = st.number_input("Vzdálenost (m):",      step=1, min_value=0, key='s1')
-        angle = st.number_input("Směrník (0–5999 dc):", step=1,              key='ang1')
-        pol   = st.number_input("Polohový úhel (dc):",  step=1,              key='pol1')
+        s     = st.number_input("Vzdálenost (m):", step=1, min_value=0, key='s1')
+        angle = st.number_input("Směrník (0–5999 dc):", step=1, key='ang1')
+        pol   = st.number_input("Polohový úhel (dc):", step=1, key='pol1')
 
     if st.button("Vypočítat HGÚ 1", type="primary", use_container_width=True):
         validate_smernik(angle, "Směrník")
@@ -644,12 +560,9 @@ elif st.session_state.page == 'hgu1':
                 if lat_a is None or lat_b is None:
                     st.error("Nepodařilo se převést souřadnice.")
                 else:
-                    label_a = (f"Stanovisko | "
-                               f"MGRS: {zone_square_hgu1} {int(ea):05d} {int(na):05d}")
-                    label_b = (f"Výsledný bod B | "
-                               f"MGRS: {zone_square_hgu1} {int(eb):05d} {int(nb):05d}")
                     show_map(lat_a, lon_a, lat_b, lon_b,
-                             label_a, label_b, map_key="hgu1")
+                             f"MGRS: {zone_square_hgu1} {int(ea):05d} {int(na):05d}",
+                             f"MGRS: {zone_square_hgu1} {int(eb):05d} {int(nb):05d}")
 
 # ============================================================
 # STRÁNKA: HGÚ 2
@@ -677,13 +590,13 @@ elif st.session_state.page == 'hgu2':
 
     col1, col2 = st.columns(2)
     with col1:
-        ea   = st.number_input("E bodu A (Stanovisko):",  step=1, key='ea2')
-        na   = st.number_input("N bodu A (Stanovisko):",  step=1, key='na2')
-        alta = st.number_input("Alt bodu A (Stanovisko):", step=1, key='alta2')
+        ea   = st.number_input("E bodu A:", step=1, key='ea2')
+        na   = st.number_input("N bodu A:", step=1, key='na2')
+        alta = st.number_input("Alt bodu A:", step=1, key='alta2')
     with col2:
-        eb   = st.number_input("E bodu B (Cíl):",  step=1, key='eb2')
-        nb   = st.number_input("N bodu B (Cíl):",  step=1, key='nb2')
-        altb = st.number_input("Alt bodu B (Cíl):", step=1, key='altb2')
+        eb   = st.number_input("E bodu B:", step=1, key='eb2')
+        nb   = st.number_input("N bodu B:", step=1, key='nb2')
+        altb = st.number_input("Alt bodu B:", step=1, key='altb2')
 
     if st.button("Vypočítat HGÚ 2", type="primary", use_container_width=True):
         de = eb - ea
@@ -731,9 +644,6 @@ elif st.session_state.page == 'hgu2':
                 if lat_a is None or lat_b is None:
                     st.error("Nepodařilo se převést souřadnice.")
                 else:
-                    label_a = (f"Stanovisko | "
-                               f"MGRS: {zone_square_hgu2} {int(ea):05d} {int(na):05d}")
-                    label_b = (f"Cíl | "
-                               f"MGRS: {zone_square_hgu2} {int(eb):05d} {int(nb):05d}")
                     show_map(lat_a, lon_a, lat_b, lon_b,
-                             label_a, label_b, map_key="hgu2")
+                             f"MGRS: {zone_square_hgu2} {int(ea):05d} {int(na):05d}",
+                             f"MGRS: {zone_square_hgu2} {int(eb):05d} {int(nb):05d}")
