@@ -1,3 +1,0 @@
-libproj-dev
-proj-data
-proj-bin
