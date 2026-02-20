@@ -5,10 +5,11 @@ import matplotlib.ticker as ticker
 import pandas as pd
 import json
 import os
+import re
 
 st.set_page_config(
     page_title="Dělostřelecká kalkulačka",
-    page_icon="",
+    page_icon="🎯",
     layout="centered",
     menu_items={
         "About": (
@@ -173,6 +174,29 @@ def validate_zone_square(zone, square):
         return None, "100km čtverec musí mít formát: 2 písmena (např. **VR**)."
     return zone + square, None
 
+def parse_mgrs_string(mgrs_str):
+    s = mgrs_str.replace(" ", "").upper()
+    match = re.match(r"^(\d{1,2}[C-X])([A-Z]{2})(\d*)$", s)
+    if not match:
+        return None, None, None, "Neplatný formát MGRS. (např. 33U VR 13500 23700)"
+    
+    zone_band = match.group(1)
+    square = match.group(2)
+    coords = match.group(3)
+    
+    if len(coords) % 2 != 0:
+        return None, None, None, "Souřadnice (E a N) musí mít stejný počet číslic."
+        
+    if len(coords) == 0:
+        e_val = 0
+        n_val = 0
+    else:
+        half = len(coords) // 2
+        e_val = int(coords[:half].ljust(5, '0'))
+        n_val = int(coords[half:].ljust(5, '0'))
+        
+    return zone_band + square, e_val, n_val, None
+
 def mgrs_en_to_wgs84(e, n, zone_square):
     try:
         zone_num    = int(zone_square[:2])
@@ -197,7 +221,6 @@ def mgrs_en_to_wgs84(e, n, zone_square):
         n_idx             = n_letters_shifted.index(sq_n)
         utm_northing      = n_idx * 100000 + (int(n) % 100000)
 
-        # OPRAVENÁ TABULKA PÁSŮ
         band_northings = {
             'C': 1100000, 'D': 2000000, 'E': 2800000, 'F': 3700000,
             'G': 4600000, 'H': 5500000, 'J': 6400000, 'K': 7300000,
@@ -337,7 +360,7 @@ def to_dms(deg, is_lat):
 # STRÁNKA: HLAVNÍ MENU
 # ============================================================
 if st.session_state.page == 'home':
-    st.title("Dělostřelecká kalkulačka")
+    st.title("🎯 Dělostřelecká kalkulačka")
     st.markdown("---")
     st.write("**Vyberte úlohu, kterou chcete počítat:**")
     st.button("HGÚ 1",              on_click=go_to_hgu1,      use_container_width=True)
@@ -396,9 +419,32 @@ elif st.session_state.page == 'prevodnik':
 
     with tab2:
         st.subheader("Převod souřadnic")
-        typ_vstupu = st.radio("Směr převodu:", ["UTM → WGS84", "WGS84 → UTM"])
+        # PŘIDÁNA MOŽNOST MGRS DO VÝBĚRU
+        typ_vstupu = st.radio("Směr převodu:", ["MGRS → UTM a WGS84", "UTM → WGS84", "WGS84 → UTM"])
 
-        if typ_vstupu == "UTM → WGS84":
+        if typ_vstupu == "MGRS → UTM a WGS84":
+            vstup_mgrs = st.text_input("Zadejte MGRS (např. 33U VR 13500 23700):")
+            if st.button("Převést MGRS", type="primary", use_container_width=True):
+                zone_sq, e_val, n_val, err = parse_mgrs_string(vstup_mgrs)
+                if err:
+                    st.error(err)
+                else:
+                    lat, lon = mgrs_en_to_wgs84(e_val, n_val, zone_sq)
+                    if lat is None or lon is None:
+                        st.error("Nepodařilo se převést zadané MGRS. Zkontrolujte, zda je zóna a čtverec platná.")
+                    else:
+                        utm_e, utm_n, zn, zl = wgs84_to_utm_math(lat, lon)
+                        st.success("Převod byl úspěšný!")
+                        st.write(f"**MGRS:** {vstup_mgrs.upper().replace(' ', '')}")
+                        st.write(f"**UTM:** Zóna {zn}{zl}, E: {utm_e:.0f}, N: {utm_n:.0f}")
+                        st.write(f"**WGS84:** Lat: {lat:.6f}°, Lon: {lon:.6f}°")
+                        st.write(f"**DMS:** {to_dms(lat, True)}, {to_dms(lon, False)}")
+                        
+                        zapis = f"MGRS {vstup_mgrs.upper().replace(' ', '')} ➔ UTM {zn}{zl} E:{utm_e:.0f} N:{utm_n:.0f}"
+                        st.session_state.history.append({"Úloha": "Převod MGRS", "Zápis": zapis})
+                        save_history(st.session_state.history)
+
+        elif typ_vstupu == "UTM → WGS84":
             c1, c2 = st.columns(2)
             with c1:
                 utm_zone = st.number_input("Zóna:", min_value=1, max_value=60, value=33, step=1)
@@ -406,7 +452,7 @@ elif st.session_state.page == 'prevodnik':
             with c2:
                 utm_e = st.number_input("East (E):", value=0.0, step=1.0)
                 utm_n = st.number_input("North (N):", value=0.0, step=1.0)
-            if st.button("Převést", type="primary", use_container_width=True):
+            if st.button("Převést UTM", type="primary", use_container_width=True):
                 try:
                     is_n     = "Severní" in utm_hemi
                     lat, lon = utm_to_wgs84_math(utm_e, utm_n, utm_zone, is_n)
@@ -425,7 +471,7 @@ elif st.session_state.page == 'prevodnik':
                 lat_in = st.number_input("Zeměpisná šířka:", value=0.0, format="%.6f")
             with c2:
                 lon_in = st.number_input("Zeměpisná délka:", value=0.0, format="%.6f")
-            if st.button("Převést", type="primary", use_container_width=True):
+            if st.button("Převést WGS84", type="primary", use_container_width=True):
                 try:
                     e, n, zn, zl = wgs84_to_utm_math(lat_in, lon_in)
                     st.success("Převod byl úspěšný!")
