@@ -197,7 +197,8 @@ def mgrs_en_to_wgs84(e, n, zone_square):
         n_idx             = n_letters_shifted.index(sq_n)
         utm_northing      = n_idx * 100000 + (int(n) % 100000)
 
-       band_northings = {
+        # OPRAVENÁ TABULKA PÁSŮ
+        band_northings = {
             'C': 1100000, 'D': 2000000, 'E': 2800000, 'F': 3700000,
             'G': 4600000, 'H': 5500000, 'J': 6400000, 'K': 7300000,
             'L': 8200000, 'M': 9100000, 'N': 0,       'P': 800000,
