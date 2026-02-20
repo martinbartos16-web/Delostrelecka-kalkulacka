@@ -8,7 +8,7 @@ import os
 
 st.set_page_config(
     page_title="Dělostřelecká kalkulačka",
-    page_icon="🎯",
+    page_icon="",
     layout="centered",
     menu_items={
         "About": (
@@ -337,7 +337,7 @@ def to_dms(deg, is_lat):
 # STRÁNKA: HLAVNÍ MENU
 # ============================================================
 if st.session_state.page == 'home':
-    st.title("🎯 Dělostřelecká kalkulačka")
+    st.title("Dělostřelecká kalkulačka")
     st.markdown("---")
     st.write("**Vyberte úlohu, kterou chcete počítat:**")
     st.button("HGÚ 1",              on_click=go_to_hgu1,      use_container_width=True)
